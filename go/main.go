@@ -242,20 +242,18 @@ func readMessage(connection *websocket.Conn, done chan struct{}) {
 			break
 		}
 
-		fmt.Printf("recv: %s", message)
-
 		var response Response
 		json.Unmarshal(message, &response)
 
 		// determine which event the message is for and handle them accordingly
 		if response.Id == connectionID {
-			log.Println("**** CASE 1 ****")
 			result := *response.Result
+			log.Println("**** CASE 1 ****", result)
 			if err := peerConnection.SetRemoteDescription(result); err != nil {
 				log.Fatal(err)
 			}
 		} else if response.Id != 0 && response.Method == "offer" {
-			log.Println("**** CASE 2 ****")
+			log.Println("**** CASE 2 ****", *response.Params)
 			// the sfu sends an offer and we react by saving the send offer into the remote
 			// description of our peer connection and sending back an answer with the
 			// local description so we can connect to the remote peer.
@@ -297,14 +295,13 @@ func readMessage(connection *websocket.Conn, done chan struct{}) {
 			messageBytes := reqBodyBytes.Bytes()
 			connection.WriteMessage(websocket.TextMessage, messageBytes)
 		} else if response.Method == "trickle" {
-			log.Println("**** CASE 3 ****")
 			// The sfu sends a new ICE candidate and we add it to the peer connection
-
 			var trickleResponse TrickleResponse
-
 			if err := json.Unmarshal(message, &trickleResponse); err != nil {
 				log.Fatal(err)
 			}
+
+			log.Println("**** CASE 3 ****", trickleResponse.Params.Candidate.Candidate)
 
 			err := peerConnection.AddICECandidate(*trickleResponse.Params.Candidate)
 
