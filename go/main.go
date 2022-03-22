@@ -28,8 +28,8 @@ import (
 )
 
 type Candidate struct {
-	Target    int                  `json:"target"`
-	Candidate *webrtc.ICECandidate `json:"candidate"`
+	Target    int                     `json:"target"`
+	Candidate webrtc.ICECandidateInit `json:"candidate"`
 }
 
 type ResponseCandidate struct {
@@ -87,7 +87,7 @@ func main() {
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
-		SDPSemantics: webrtc.SDPSemanticsUnifiedPlanWithFallback,
+		SDPSemantics: webrtc.SDPSemanticsUnifiedPlan,
 	}
 
 	// MediaEngine lets us define the codecs supported by the peer connection
@@ -169,8 +169,9 @@ func main() {
 			return
 		}
 
+		log.Println("got candidate:", candidate.Address)
 		candidateJSON, err := json.Marshal(&Candidate{
-			Candidate: candidate,
+			Candidate: candidate.ToJSON(),
 			Target:    0,
 		})
 
@@ -190,11 +191,14 @@ func main() {
 
 		messageBytes := reqBodyBytes.Bytes()
 		c.WriteMessage(websocket.TextMessage, messageBytes)
-
 	})
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		fmt.Printf("Connection State has changed to %s \n", connectionState.String())
+	})
+
+	peerConnection.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(selectedPair *webrtc.ICECandidatePair) {
+		log.Println("selectedPair:", selectedPair)
 	})
 
 	offerJSON, err := json.Marshal(&SendOffer{
@@ -269,10 +273,7 @@ func readMessage(connection *websocket.Conn, done chan struct{}) {
 			connectionUUID := uuid.New()
 			connectionID = uint64(connectionUUID.ID())
 
-			offerJSON, err := json.Marshal(&SendAnswer{
-				Answer: peerConnection.LocalDescription(),
-				SID:    "test room",
-			})
+			offerJSON, err := json.Marshal(peerConnection.LocalDescription())
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -304,7 +305,6 @@ func readMessage(connection *websocket.Conn, done chan struct{}) {
 			log.Println("**** CASE 3 ****", trickleResponse.Params.Candidate.Candidate)
 
 			err := peerConnection.AddICECandidate(*trickleResponse.Params.Candidate)
-
 			if err != nil {
 				log.Fatal(err)
 			}

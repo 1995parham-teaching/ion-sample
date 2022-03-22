@@ -15,7 +15,7 @@ const config = {
 };
 
 const signalLocal = new Signal.IonSFUJSONRPCSignal(
-    "ws://127.0.0.1:7000/ws"
+    "ws://ion-sfu-mohammad-sandbox.apps.private.okd4.teh-1.snappcloud.io/ws"
 );
 
 const clientLocal = new IonSDK.Client(signalLocal, config);
