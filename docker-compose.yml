@@ -3,6 +3,7 @@ services:
     image: pionwebrtc/ion-sfu:latest-jsonrpc
     ports:
       - "7000:7000"
+      - "5000-5200:5000-5200/udp"
     volumes:
       - ./sfu.toml:/configs/sfu.toml:ro
     environment:
