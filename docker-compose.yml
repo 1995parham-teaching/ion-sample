@@ -1,0 +1,9 @@
+services:
+  sfu:
+    image: pionwebrtc/ion-sfu:latest-jsonrpc
+    ports:
+      - "7000:7000"
+    volumes:
+      - ./sfu.toml:/configs/sfu.toml:ro
+    environment:
+      - PION_LOG_TRACE=sfu

@@ -1,0 +1,31 @@
+[sfu]
+ballast = 0
+withoutsimulcast = true
+
+[router]
+withstats = false
+maxbandwidth = 1500
+maxpackettrack = 500
+
+[router.simulcast]
+bestqualityfirst = true
+enabletemporallayer = true
+
+[webrtc]
+icemux = true
+icelite = true
+iceportrange = [5000, 5200]
+sdpsemantics = "unified-plan"
+
+[webrtc.candidates]
+nat1to1 = ["127.0.0.1"]
+icelite = true
+
+[[webrtc.iceserver]]
+urls = ["stun:stun.l.google.com:19302"]
+
+[turn]
+enabled = false
+
+[log]
+level = "info"

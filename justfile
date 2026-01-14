@@ -5,6 +5,18 @@
 default:
     @just --list
 
+# Start Ion SFU server
+sfu:
+    docker compose up -d
+
+# Stop Ion SFU server
+sfu-down:
+    docker compose down
+
+# View SFU logs
+sfu-logs:
+    docker compose logs -f
+
 # Run publisher (Go client that broadcasts camera/mic)
 publish addr="localhost:7000":
     cd publisher && go run main.go -addr {{addr}}

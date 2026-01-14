@@ -108,7 +108,7 @@ Publisher                         SFU                          Viewer
 
 ## Project Structure
 
-```
+```text
 ion-sample/
 ├── publisher/
 │   ├── main.go          # Go broadcaster client
@@ -120,6 +120,8 @@ ion-sample/
 ├── viewer-raw/
 │   ├── index.html       # HTML page with raw WebRTC
 │   └── index.js         # Low-level WebRTC implementation
+├── docker-compose.yml   # Ion SFU server
+├── sfu.toml             # Ion SFU configuration
 ├── justfile             # Task runner commands
 ├── LICENSE
 └── README.md
@@ -178,15 +180,24 @@ Example: `index.html?sfu=ws://192.168.1.100:7000/ws&room=my-room`
 
 ### Prerequisites
 
-- Go 1.17+
-- Ion SFU server running
-- Camera and microphone (for Go client)
-- Modern web browser (for JS clients)
+- Docker and Docker Compose (for Ion SFU server)
+- Go 1.17+ (for publisher)
+- Camera and microphone (for publisher)
+- Modern web browser (for viewers)
 - [just](https://github.com/casey/just) command runner (optional)
 
 ### Using justfile
 
 ```bash
+# Start Ion SFU server
+just sfu
+
+# Stop Ion SFU server
+just sfu-down
+
+# View SFU logs
+just sfu-logs
+
 # Run publisher
 just publish
 
@@ -204,6 +215,12 @@ just update-deps
 ```
 
 ### Manual Usage
+
+**Start SFU Server:**
+
+```bash
+docker compose up -d
+```
 
 **Publisher:**
 
