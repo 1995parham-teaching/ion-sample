@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/url"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -15,7 +18,7 @@ import (
 	"github.com/pion/mediadevices/pkg/codec/vpx"
 	"github.com/pion/mediadevices/pkg/frame"
 	"github.com/pion/mediadevices/pkg/prop"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 	"github.com/sourcegraph/jsonrpc2"
 
 	// Note: If you don't have a camera or microphone or your adapters are not supported,
@@ -27,35 +30,37 @@ import (
 	_ "github.com/pion/mediadevices/pkg/driver/microphone"
 )
 
+// Candidate represents an ICE candidate to send to the SFU.
 type Candidate struct {
 	Target    int                     `json:"target"`
 	Candidate webrtc.ICECandidateInit `json:"candidate"`
 }
 
+// ResponseCandidate represents an ICE candidate received from the SFU.
 type ResponseCandidate struct {
 	Target    int                      `json:"target"`
 	Candidate *webrtc.ICECandidateInit `json:"candidate"`
 }
 
-// SendOffer object to send to the sfu over Websockets
+// SDPDescription is a JSON-serializable SDP with string type.
+type SDPDescription struct {
+	Type string `json:"type"`
+	SDP  string `json:"sdp"`
+}
+
+// SendOffer is the object sent to join a room via the SFU.
 type SendOffer struct {
-	SID   string                     `json:"sid"`
-	Offer *webrtc.SessionDescription `json:"offer"`
+	SID   string          `json:"sid"`
+	Offer *SDPDescription `json:"offer"`
 }
 
-// SendAnswer object to send to the sfu over Websockets
-type SendAnswer struct {
-	SID    string                     `json:"sid"`
-	Answer *webrtc.SessionDescription `json:"answer"`
-}
-
-// TrickleResponse received from the sfu server
+// TrickleResponse is received from the SFU server for ICE candidates.
 type TrickleResponse struct {
 	Params ResponseCandidate `json:"params"`
 	Method string            `json:"method"`
 }
 
-// Response received from the sfu over Websockets
+// Response is received from the SFU over WebSocket.
 type Response struct {
 	Params *webrtc.SessionDescription `json:"params"`
 	Result *webrtc.SessionDescription `json:"result"`
@@ -63,63 +68,267 @@ type Response struct {
 	Id     uint64                     `json:"id"`
 }
 
-var peerConnection *webrtc.PeerConnection
-var connectionID uint64
+// Publisher handles WebRTC publishing to Ion SFU.
+type Publisher struct {
+	peerConnection *webrtc.PeerConnection
+	wsConn         *websocket.Conn
+	wsMutex        sync.Mutex
+	connectionID   uint64
+	room           string
+	done           chan struct{}
+	closeOnce      sync.Once
+	tracks         []mediadevices.Track
+}
 
-var addr string
+// toSDPDescription converts a webrtc.SessionDescription to a JSON-serializable format.
+func toSDPDescription(sd *webrtc.SessionDescription) *SDPDescription {
+	if sd == nil {
+		return nil
+	}
+	return &SDPDescription{
+		Type: sd.Type.String(),
+		SDP:  sd.SDP,
+	}
+}
+
+// writeMessage safely writes a message to the WebSocket connection.
+func (p *Publisher) writeMessage(data []byte) error {
+	p.wsMutex.Lock()
+	defer p.wsMutex.Unlock()
+	return p.wsConn.WriteMessage(websocket.TextMessage, data)
+}
+
+// sendJSONRPC sends a JSON-RPC request over WebSocket.
+func (p *Publisher) sendJSONRPC(method string, params interface{}, id uint64) error {
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("failed to marshal params: %w", err)
+	}
+
+	rawParams := json.RawMessage(paramsJSON)
+	message := &jsonrpc2.Request{
+		Method: method,
+		Params: &rawParams,
+	}
+
+	if id != 0 {
+		message.ID = jsonrpc2.ID{Num: id}
+	}
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(message); err != nil {
+		return fmt.Errorf("failed to encode message: %w", err)
+	}
+
+	return p.writeMessage(buf.Bytes())
+}
+
+// handleMessages processes incoming WebSocket messages from the SFU.
+func (p *Publisher) handleMessages() {
+	defer close(p.done)
+
+	for {
+		_, message, err := p.wsConn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("WebSocket error: %v", err)
+			}
+			return
+		}
+
+		var response Response
+		if err := json.Unmarshal(message, &response); err != nil {
+			log.Printf("Failed to unmarshal response: %v", err)
+			continue
+		}
+
+		switch {
+		case response.Id == p.connectionID && response.Result != nil:
+			// Response to our join request
+			log.Println("Received SFU answer")
+			if err := p.peerConnection.SetRemoteDescription(*response.Result); err != nil {
+				log.Printf("Failed to set remote description: %v", err)
+			}
+
+		case response.Method == "offer" && response.Params != nil:
+			// SFU sends an offer for renegotiation
+			log.Println("Received renegotiation offer from SFU")
+			if err := p.handleRenegotiation(response.Params); err != nil {
+				log.Printf("Failed to handle renegotiation: %v", err)
+			}
+
+		case response.Method == "trickle":
+			// SFU sends a new ICE candidate
+			var trickleResponse TrickleResponse
+			if err := json.Unmarshal(message, &trickleResponse); err != nil {
+				log.Printf("Failed to unmarshal trickle response: %v", err)
+				continue
+			}
+
+			if trickleResponse.Params.Candidate == nil {
+				continue
+			}
+
+			log.Printf("Received ICE candidate: %s", trickleResponse.Params.Candidate.Candidate)
+			if err := p.peerConnection.AddICECandidate(*trickleResponse.Params.Candidate); err != nil {
+				log.Printf("Failed to add ICE candidate: %v", err)
+			}
+		}
+	}
+}
+
+// handleRenegotiation processes an offer from the SFU and sends back an answer.
+func (p *Publisher) handleRenegotiation(offer *webrtc.SessionDescription) error {
+	if err := p.peerConnection.SetRemoteDescription(*offer); err != nil {
+		return fmt.Errorf("failed to set remote description: %w", err)
+	}
+
+	answer, err := p.peerConnection.CreateAnswer(nil)
+	if err != nil {
+		return fmt.Errorf("failed to create answer: %w", err)
+	}
+
+	if err := p.peerConnection.SetLocalDescription(answer); err != nil {
+		return fmt.Errorf("failed to set local description: %w", err)
+	}
+
+	p.connectionID = uint64(uuid.New().ID())
+
+	return p.sendJSONRPC("answer", toSDPDescription(p.peerConnection.LocalDescription()), p.connectionID)
+}
+
+// setupICEHandlers configures ICE candidate and connection state handlers.
+func (p *Publisher) setupICEHandlers() {
+	p.peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+
+		log.Printf("Sending ICE candidate: %s", candidate.Address)
+
+		err := p.sendJSONRPC("trickle", &Candidate{
+			Candidate: candidate.ToJSON(),
+			Target:    0,
+		}, 0)
+
+		if err != nil {
+			log.Printf("Failed to send ICE candidate: %v", err)
+		}
+	})
+
+	p.peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Printf("ICE connection state: %s", state.String())
+
+		if state == webrtc.ICEConnectionStateFailed || state == webrtc.ICEConnectionStateDisconnected {
+			log.Println("Connection lost, consider reconnecting...")
+		}
+	})
+
+	p.peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		log.Printf("Peer connection state: %s", state.String())
+	})
+}
+
+// join sends a join request to the SFU with the local offer.
+func (p *Publisher) join() error {
+	offer, err := p.peerConnection.CreateOffer(nil)
+	if err != nil {
+		return fmt.Errorf("failed to create offer: %w", err)
+	}
+
+	if err := p.peerConnection.SetLocalDescription(offer); err != nil {
+		return fmt.Errorf("failed to set local description: %w", err)
+	}
+
+	p.connectionID = uint64(uuid.New().ID())
+
+	return p.sendJSONRPC("join", &SendOffer{
+		Offer: toSDPDescription(p.peerConnection.LocalDescription()),
+		SID:   p.room,
+	}, p.connectionID)
+}
+
+// Close gracefully shuts down the publisher.
+func (p *Publisher) Close() error {
+	var closeErr error
+	p.closeOnce.Do(func() {
+		// Stop media tracks first
+		for _, track := range p.tracks {
+			track.Close()
+		}
+
+		if p.peerConnection != nil {
+			if err := p.peerConnection.Close(); err != nil {
+				closeErr = err
+			}
+		}
+		if p.wsConn != nil {
+			if err := p.wsConn.Close(); err != nil && closeErr == nil {
+				closeErr = err
+			}
+		}
+	})
+	return closeErr
+}
+
+var (
+	addr string
+	room string
+)
 
 func main() {
-	flag.StringVar(&addr, "addr", "localhost:7000", "address to use")
+	flag.StringVar(&addr, "addr", "localhost:7000", "SFU server address")
+	flag.StringVar(&room, "room", "test room", "room to join")
 	flag.Parse()
 
 	u := url.URL{Scheme: "ws", Host: addr, Path: "/ws"}
-	log.Printf("connecting to %s", u.String())
+	log.Printf("Connecting to %s", u.String())
 
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	wsConn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		log.Fatal("dial:", err)
+		log.Fatalf("Failed to connect to SFU: %v", err)
 	}
-	defer c.Close()
 
+	publisher := &Publisher{
+		wsConn: wsConn,
+		room:   room,
+		done:   make(chan struct{}),
+	}
+	defer publisher.Close()
+
+	// Configure WebRTC
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
 		},
 		SDPSemantics: webrtc.SDPSemanticsUnifiedPlan,
 	}
 
-	// MediaEngine lets us define the codecs supported by the peer connection
+	// Setup media engine with VP8 codec
 	mediaEngine := webrtc.MediaEngine{}
 
 	vpxParams, err := vpx.NewVP8Params()
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to create VP8 params: %v", err)
 	}
 	vpxParams.BitRate = 500_000 // 500kbps
 
 	codecSelector := mediadevices.NewCodecSelector(
 		mediadevices.WithVideoEncoders(&vpxParams),
 	)
-
 	codecSelector.Populate(&mediaEngine)
+
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine))
-	peerConnection, err = api.NewPeerConnection(config)
+	publisher.peerConnection, err = api.NewPeerConnection(config)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to create peer connection: %v", err)
 	}
 
-	// Read incoming Websocket messages
-	done := make(chan struct{})
+	// Print available devices
+	log.Println("Available devices:", mediadevices.EnumerateDevices())
 
-	go readMessage(c, done)
-
-	// print all connected devices
-	fmt.Println(mediadevices.EnumerateDevices())
-
-	// get the user media
-	s, err := mediadevices.GetUserMedia(mediadevices.MediaStreamConstraints{
+	// Get user media (camera)
+	stream, err := mediadevices.GetUserMedia(mediadevices.MediaStreamConstraints{
 		Video: func(c *mediadevices.MediaTrackConstraints) {
 			c.FrameFormat = prop.FrameFormat(frame.FormatYUY2)
 			c.Width = prop.Int(640)
@@ -127,187 +336,51 @@ func main() {
 		},
 		Codec: codecSelector,
 	})
-
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to get user media: %v", err)
 	}
 
-	for _, track := range s.GetTracks() {
+	// Add tracks to peer connection
+	publisher.tracks = stream.GetTracks()
+	for _, track := range publisher.tracks {
 		track.OnEnded(func(err error) {
-			fmt.Printf("Track (ID: %s) ended with error: %v\n",
-				track.ID(), err)
+			if err != nil {
+				log.Printf("Track (ID: %s) ended with error: %v", track.ID(), err)
+			}
 		})
-		_, err = peerConnection.AddTransceiverFromTrack(track,
-			webrtc.RtpTransceiverInit{
+
+		_, err = publisher.peerConnection.AddTransceiverFromTrack(track,
+			webrtc.RTPTransceiverInit{
 				Direction: webrtc.RTPTransceiverDirectionSendonly,
 			},
 		)
 		if err != nil {
-			panic(err)
+			log.Fatalf("Failed to add track: %v", err)
 		}
+		log.Printf("Added track: %s", track.ID())
 	}
 
-	// Creating WebRTC offer
-	offer, err := peerConnection.CreateOffer(nil)
-	if err != nil {
-		panic(err)
+	// Setup handlers and join
+	publisher.setupICEHandlers()
+
+	go publisher.handleMessages()
+
+	if err := publisher.join(); err != nil {
+		log.Fatalf("Failed to join room: %v", err)
+	}
+	log.Printf("Joining room: %s", room)
+
+	// Wait for shutdown signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case <-publisher.done:
+		log.Println("Connection closed")
+	case sig := <-sigChan:
+		log.Printf("Received signal %v, shutting down...", sig)
 	}
 
-	// Set the remote SessionDescription
-	err = peerConnection.SetLocalDescription(offer)
-	if err != nil {
-		panic(err)
-	}
-
-	// Handling OnICECandidate event because we need to correctly respond
-	// to the WebRTC events and the response from the Websockets server
-	// is called whenever a new ICE candidate is found. The method is then
-	// used to negotiate a connection with the remote peer by sending
-	// a trickle request to the sfu
-	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-
-		log.Println("got candidate:", candidate.Address)
-		candidateJSON, err := json.Marshal(&Candidate{
-			Candidate: candidate.ToJSON(),
-			Target:    0,
-		})
-
-		params := (*json.RawMessage)(&candidateJSON)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		message := &jsonrpc2.Request{
-			Method: "trickle",
-			Params: params,
-		}
-
-		reqBodyBytes := new(bytes.Buffer)
-		json.NewEncoder(reqBodyBytes).Encode(message)
-
-		messageBytes := reqBodyBytes.Bytes()
-		c.WriteMessage(websocket.TextMessage, messageBytes)
-	})
-
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("Connection State has changed to %s \n", connectionState.String())
-	})
-
-	peerConnection.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(selectedPair *webrtc.ICECandidatePair) {
-		log.Println("selectedPair:", selectedPair)
-	})
-
-	offerJSON, err := json.Marshal(&SendOffer{
-		Offer: peerConnection.LocalDescription(),
-		SID:   "test room",
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	params := (*json.RawMessage)(&offerJSON)
-
-	connectionUUID := uuid.New()
-	connectionID = uint64(connectionUUID.ID())
-
-	offerMessage := &jsonrpc2.Request{
-		Method: "join",
-		Params: params,
-		ID: jsonrpc2.ID{
-			IsString: false,
-			Str:      "",
-			Num:      connectionID,
-		},
-	}
-
-	reqBodyBytes := new(bytes.Buffer)
-	json.NewEncoder(reqBodyBytes).Encode(offerMessage)
-
-	// send the offer over to the sfu using Websockets
-	messageBytes := reqBodyBytes.Bytes()
-	c.WriteMessage(websocket.TextMessage, messageBytes)
-
-	<-done
-}
-
-// readMessage is used to receive and react to the incoming
-// Websockets messages send by the sfu
-func readMessage(connection *websocket.Conn, done chan struct{}) {
-	defer close(done)
-
-	for {
-		_, message, err := connection.ReadMessage()
-		if err != nil || err == io.EOF {
-			log.Fatal("Error reading: ", err)
-			break
-		}
-
-		var response Response
-		json.Unmarshal(message, &response)
-
-		// determine which event the message is for and handle them accordingly
-		if response.Id == connectionID {
-			result := *response.Result
-			log.Println("**** CASE 1 ****", result)
-			if err := peerConnection.SetRemoteDescription(result); err != nil {
-				log.Fatal(err)
-			}
-		} else if response.Id != 0 && response.Method == "offer" {
-			log.Println("**** CASE 2 ****", *response.Params)
-			// the sfu sends an offer and we react by saving the send offer into the remote
-			// description of our peer connection and sending back an answer with the
-			// local description so we can connect to the remote peer.
-
-			peerConnection.SetRemoteDescription(*response.Params)
-			answer, err := peerConnection.CreateAnswer(nil)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			peerConnection.SetLocalDescription(answer)
-
-			connectionUUID := uuid.New()
-			connectionID = uint64(connectionUUID.ID())
-
-			offerJSON, err := json.Marshal(peerConnection.LocalDescription())
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			params := (*json.RawMessage)(&offerJSON)
-
-			answerMessage := &jsonrpc2.Request{
-				Method: "answer",
-				Params: params,
-				ID: jsonrpc2.ID{
-					IsString: false,
-					Str:      "",
-					Num:      connectionID,
-				},
-			}
-
-			reqBodyBytes := new(bytes.Buffer)
-			json.NewEncoder(reqBodyBytes).Encode(answerMessage)
-
-			messageBytes := reqBodyBytes.Bytes()
-			connection.WriteMessage(websocket.TextMessage, messageBytes)
-		} else if response.Method == "trickle" {
-			// The sfu sends a new ICE candidate and we add it to the peer connection
-			var trickleResponse TrickleResponse
-			if err := json.Unmarshal(message, &trickleResponse); err != nil {
-				log.Fatal(err)
-			}
-
-			log.Println("**** CASE 3 ****", trickleResponse.Params.Candidate.Candidate)
-
-			err := peerConnection.AddICECandidate(*trickleResponse.Params.Candidate)
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-	}
+	// Cleanup is handled by defer publisher.Close()
+	log.Println("Shutdown complete")
 }
