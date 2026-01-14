@@ -45,12 +45,13 @@ A teaching example demonstrating WebRTC media broadcasting using [LiveKit](https
 ion-sample/
 ├── publisher/
 │   ├── main.go          # Go broadcaster client
-│   ├── go.mod           # Go module definition
-│   └── go.sum           # Dependency checksums
+│   ├── go.mod
+│   └── go.sum
 ├── viewer/
-│   ├── index.html       # HTML page
-│   └── index.js         # LiveKit SDK implementation
+│   ├── index.html
+│   └── index.js
 ├── docker-compose.yml   # LiveKit server
+├── livekit.yaml         # LiveKit configuration
 ├── justfile             # Task runner commands
 ├── LICENSE
 └── README.md
@@ -68,13 +69,6 @@ ion-sample/
 | `-room`        | `test-room`             | Room name             |
 | `-identity`    | `go-publisher`          | Participant identity  |
 
-| Setting      | Value                     | Description             |
-| ------------ | ------------------------- | ----------------------- |
-| Video Codec  | VP8                       | Video encoding format   |
-| Bitrate      | 500 kbps                  | Target video bitrate    |
-| Resolution   | 640x480                   | Video dimensions        |
-| Frame Format | YUY2                      | Raw video format        |
-
 ### JavaScript Client (`viewer/`)
 
 Configuration via URL parameters:
@@ -87,7 +81,7 @@ Configuration via URL parameters:
 | `api_key`    | `devkey`                | LiveKit API key      |
 | `api_secret` | `secret`                | LiveKit API secret   |
 
-Example: `index.html?room=my-room&identity=viewer1`
+Example: `http://localhost:8080/?room=my-room&identity=viewer1`
 
 > **Note:** The viewer generates JWT tokens client-side for development convenience.
 > In production, tokens should be generated server-side.
@@ -96,25 +90,25 @@ Example: `index.html?room=my-room&identity=viewer1`
 
 ### Go
 
-| Package                      | Purpose                  |
-| ---------------------------- | ------------------------ |
-| `livekit/protocol`           | LiveKit protocol types   |
-| `livekit/server-sdk-go/v2`   | LiveKit server SDK       |
-| `pion/webrtc/v4`             | WebRTC implementation    |
-| `pion/mediadevices`          | Camera/microphone access |
+| Package                    | Purpose                  |
+| -------------------------- | ------------------------ |
+| `livekit/protocol`         | LiveKit protocol types   |
+| `livekit/server-sdk-go/v2` | LiveKit server SDK       |
+| `pion/webrtc/v4`           | WebRTC implementation    |
+| `pion/mediadevices`        | Camera/microphone access |
 
 ### JavaScript
 
-| Library          | Version | Purpose              |
-| ---------------- | ------- | -------------------- |
-| `livekit-client` | 2.9.1   | LiveKit client SDK   |
+| Library          | Purpose            |
+| ---------------- | ------------------ |
+| `livekit-client` | LiveKit client SDK |
 
 ## Usage
 
 ### Prerequisites
 
-- Docker and Docker Compose (for LiveKit server)
-- Go 1.23+ (for publisher)
+- Docker and Docker Compose
+- Go 1.23+
 - Camera and microphone (for publisher)
 - Modern web browser (for viewer)
 - [just](https://github.com/casey/just) command runner (optional)
@@ -125,43 +119,38 @@ Example: `index.html?room=my-room&identity=viewer1`
 # Start LiveKit server
 just sfu
 
+# In another terminal, start the publisher
+just publish
+
 # In another terminal, start the viewer
 just serve
 # Open http://localhost:8080 in your browser
-
-# In another terminal, start the publisher
-just publish
 ```
 
-### Using justfile
+### Just Commands
 
 ```bash
-# Start LiveKit server
-just sfu
+just              # Show available commands
+just sfu          # Start LiveKit server (detached)
+just sfu-down     # Stop LiveKit server
+just sfu-logs     # View LiveKit server logs
+just publish      # Run publisher with defaults
+just serve        # Serve viewer on port 8080
+just build        # Build publisher binary
+just update-deps  # Update Go dependencies
+just fmt          # Format Go code
+just vet          # Run Go vet
+just clean        # Remove build artifacts
+```
 
-# Stop LiveKit server
-just sfu-down
+### Custom Parameters
 
-# View LiveKit logs
-just sfu-logs
+```bash
+# Publisher with custom settings
+just publish host="http://192.168.1.100:7880" api_key="mykey" api_secret="mysecret"
 
-# Run publisher
-just publish
-
-# Run publisher with custom settings
-just publish host="http://192.168.1.100:7880"
-
-# Serve viewer
-just serve
-
-# Serve viewer on custom port
+# Viewer on custom port
 just serve port=3000
-
-# Build publisher binary
-just build
-
-# Update Go dependencies
-just update-deps
 ```
 
 ### Manual Usage
