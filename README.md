@@ -4,13 +4,14 @@ A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https
 
 ## Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Ion SFU Server                                  │
-│                         (Selective Forwarding Unit)                          │
-│                                                                              │
+│                              Ion SFU Server                                 │
+│                         (Selective Forwarding Unit)                         │
+│                                                                             │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │
 │  │   Room Manager  │    │  Media Router   │    │ Signaling (WS)  │          │
+|  └-----------------┘    └-----------------┘    └-----------------┘          |
 └──────────────────────────────────┬──────────────────────────────────────────┘
                                    │
                     WebSocket + JSON-RPC 2.0
@@ -33,8 +34,8 @@ A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https
 ### Components
 
 | Component | Language | Role | Description |
-|-----------|----------|------|-------------|
-| `publisher/` | Go | Publisher | Captures camera/microphone, encodes to VP8, broadcasts to SFU |
+|---------------|----------|------|-------------|
+| `publisher/`  | Go | Publisher | Captures camera/microphone, encodes to VP8, broadcasts to SFU |
 | `viewer-sdk/` | JavaScript | Viewer | Receives streams using Ion SDK (high-level API) |
 | `viewer-raw/` | JavaScript | Viewer | Receives streams using raw WebRTC (low-level API) |
 
@@ -44,7 +45,7 @@ Communication between clients and SFU uses **JSON-RPC 2.0 over WebSocket**.
 
 ### Message Flow
 
-```
+```text
 Publisher                         SFU                          Viewer
     │                              │                              │
     │──── join(offer, sid) ───────▶│                              │
