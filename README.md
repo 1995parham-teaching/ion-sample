@@ -1,6 +1,7 @@
 # Ion SFU Sample
 
-A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https://github.com/pion/ion-sfu) (Selective Forwarding Unit) with [Pion](https://github.com/pion) libraries.
+A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https://github.com/pion/ion-sfu)
+(Selective Forwarding Unit) with [Pion](https://github.com/pion) libraries.
 
 ## Architecture Overview
 
@@ -33,11 +34,11 @@ A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https
 
 ### Components
 
-| Component | Language | Role | Description |
-|---------------|----------|------|-------------|
-| `publisher/`  | Go | Publisher | Captures camera/microphone, encodes to VP8, broadcasts to SFU |
-| `viewer-sdk/` | JavaScript | Viewer | Receives streams using Ion SDK (high-level API) |
-| `viewer-raw/` | JavaScript | Viewer | Receives streams using raw WebRTC (low-level API) |
+| Component     | Language   | Role      | Description                                                   |
+| ------------- | ---------- | --------- | ------------------------------------------------------------- |
+| `publisher/`  | Go         | Publisher | Captures camera/microphone, encodes to VP8, broadcasts to SFU |
+| `viewer-sdk/` | JavaScript | Viewer    | Receives streams using Ion SDK (high-level API)               |
+| `viewer-raw/` | JavaScript | Viewer    | Receives streams using raw WebRTC (low-level API)             |
 
 ## Signaling Protocol
 
@@ -62,16 +63,17 @@ Publisher                         SFU                          Viewer
 
 ### JSON-RPC Methods
 
-| Method | Direction | Description |
-|--------|-----------|-------------|
-| `join` | Client → SFU | Join a room with SDP offer |
-| `offer` | SFU → Client | SFU sends offer for new peer connection |
-| `answer` | Client → SFU | Client responds to SFU offer |
-| `trickle` | Bidirectional | ICE candidate exchange |
+| Method    | Direction     | Description                             |
+| --------- | ------------- | --------------------------------------- |
+| `join`    | Client → SFU  | Join a room with SDP offer              |
+| `offer`   | SFU → Client  | SFU sends offer for new peer connection |
+| `answer`  | Client → SFU  | Client responds to SFU offer            |
+| `trickle` | Bidirectional | ICE candidate exchange                  |
 
 ### Message Examples
 
 **Join Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -88,6 +90,7 @@ Publisher                         SFU                          Viewer
 ```
 
 **Trickle (ICE Candidate):**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -126,24 +129,24 @@ ion-sample/
 
 ### Go Client (`publisher/main.go`)
 
-| Setting | Value | Description |
-|---------|-------|-------------|
-| SFU Address | `localhost:7000` | WebSocket endpoint (configurable via `-addr` flag) |
-| STUN Server | `stun.l.google.com:19302` | Google's public STUN server |
-| Room ID | `test room` | Room identifier |
-| Video Codec | VP8 | Video encoding format |
-| Bitrate | 500 kbps | Target video bitrate |
-| Resolution | 640x480 | Video dimensions |
-| Frame Format | YUY2 | Raw video format |
+| Setting      | Value                     | Description                                        |
+| ------------ | ------------------------- | -------------------------------------------------- |
+| SFU Address  | `localhost:7000`          | WebSocket endpoint (configurable via `-addr` flag) |
+| STUN Server  | `stun.l.google.com:19302` | Google's public STUN server                        |
+| Room ID      | `test room`               | Room identifier                                    |
+| Video Codec  | VP8                       | Video encoding format                              |
+| Bitrate      | 500 kbps                  | Target video bitrate                               |
+| Resolution   | 640x480                   | Video dimensions                                   |
+| Frame Format | YUY2                      | Raw video format                                   |
 
 ### JavaScript Clients
 
 Configuration is done via URL parameters:
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `sfu` | `ws://localhost:7000/ws` | SFU WebSocket URL |
-| `room` | `test room` | Room identifier |
+| Parameter | Default                  | Description       |
+| --------- | ------------------------ | ----------------- |
+| `sfu`     | `ws://localhost:7000/ws` | SFU WebSocket URL |
+| `room`    | `test room`              | Room identifier   |
 
 Example: `index.html?sfu=ws://192.168.1.100:7000/ws&room=my-room`
 
@@ -151,24 +154,24 @@ Example: `index.html?sfu=ws://192.168.1.100:7000/ws&room=my-room`
 
 ### Go
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `pion/webrtc/v3` | v3.1.24 | WebRTC implementation |
-| `pion/mediadevices` | v0.3.2 | Camera/microphone access |
-| `gorilla/websocket` | v1.5.0 | WebSocket client |
-| `sourcegraph/jsonrpc2` | v0.1.0 | JSON-RPC 2.0 protocol |
-| `google/uuid` | v1.3.0 | UUID generation |
+| Package                | Version | Purpose                  |
+| ---------------------- | ------- | ------------------------ |
+| `pion/webrtc/v3`       | v3.1.24 | WebRTC implementation    |
+| `pion/mediadevices`    | v0.3.2  | Camera/microphone access |
+| `gorilla/websocket`    | v1.5.0  | WebSocket client         |
+| `sourcegraph/jsonrpc2` | v0.1.0  | JSON-RPC 2.0 protocol    |
+| `google/uuid`          | v1.3.0  | UUID generation          |
 
 ### JavaScript (viewer-sdk/)
 
-| Library | Version | Purpose |
-|---------|---------|---------|
-| `ion-sdk-js` | 1.8.1 | High-level Ion client SDK |
+| Library      | Version | Purpose                   |
+| ------------ | ------- | ------------------------- |
+| `ion-sdk-js` | 1.8.1   | High-level Ion client SDK |
 
 ### JavaScript (viewer-raw/)
 
-| Library | Purpose |
-|---------|---------|
+| Library             | Purpose                     |
+| ------------------- | --------------------------- |
 | `simple-jsonrpc-js` | JSON-RPC 2.0 implementation |
 
 ## Usage
@@ -203,11 +206,13 @@ just update-deps
 ### Manual Usage
 
 **Publisher:**
+
 ```bash
 cd publisher && go run main.go -addr localhost:7000
 ```
 
 **Viewers:**
+
 ```bash
 cd viewer-sdk && python3 -m http.server 8080
 # Open http://localhost:8080?sfu=ws://localhost:7000/ws
