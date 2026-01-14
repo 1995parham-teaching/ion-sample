@@ -1,21 +1,21 @@
-# Ion SFU Sample
+# LiveKit Sample
 
-A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https://github.com/pion/ion-sfu)
+A teaching example demonstrating WebRTC media broadcasting using [LiveKit](https://livekit.io/)
 (Selective Forwarding Unit) with [Pion](https://github.com/pion) libraries.
 
 ## Architecture Overview
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Ion SFU Server                                 │
-│                         (Selective Forwarding Unit)                         │
+│                             LiveKit Server                                  │
+│                        (Selective Forwarding Unit)                          │
 │                                                                             │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │
 │  │   Room Manager  │    │  Media Router   │    │ Signaling (WS)  │          │
-|  └-----------------┘    └-----------------┘    └-----------------┘          |
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘          │
 └──────────────────────────────────┬──────────────────────────────────────────┘
                                    │
-                    WebSocket + JSON-RPC 2.0
+                    WebSocket + Protobuf
                                    │
         ┌──────────────────────────┼──────────────────────────┐
         │                          │                          │
@@ -34,77 +34,10 @@ A teaching example demonstrating WebRTC media broadcasting using [Ion SFU](https
 
 ### Components
 
-| Component     | Language   | Role      | Description                                                   |
-| ------------- | ---------- | --------- | ------------------------------------------------------------- |
-| `publisher/`  | Go         | Publisher | Captures camera/microphone, encodes to VP8, broadcasts to SFU |
-| `viewer-sdk/` | JavaScript | Viewer    | Receives streams using Ion SDK (high-level API)               |
-| `viewer-raw/` | JavaScript | Viewer    | Receives streams using raw WebRTC (low-level API)             |
-
-## Signaling Protocol
-
-Communication between clients and SFU uses **JSON-RPC 2.0 over WebSocket**.
-
-### Message Flow
-
-```text
-Publisher                         SFU                          Viewer
-    │                              │                              │
-    │──── join(offer, sid) ───────▶│                              │
-    │◀─── answer ──────────────────│                              │
-    │                              │                              │
-    │◀───── trickle ──────────────▶│◀───── trickle ──────────────▶│
-    │     (ICE candidates)         │     (ICE candidates)         │
-    │                              │                              │
-    │════ Media Stream (RTP) ═════▶│════ Media Stream (RTP) ═════▶│
-    │                              │                              │
-    │                              │──── offer ──────────────────▶│
-    │                              │◀─── answer ──────────────────│
-```
-
-### JSON-RPC Methods
-
-| Method    | Direction     | Description                             |
-| --------- | ------------- | --------------------------------------- |
-| `join`    | Client → SFU  | Join a room with SDP offer              |
-| `offer`   | SFU → Client  | SFU sends offer for new peer connection |
-| `answer`  | Client → SFU  | Client responds to SFU offer            |
-| `trickle` | Bidirectional | ICE candidate exchange                  |
-
-### Message Examples
-
-**Join Request:**
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 12345,
-  "method": "join",
-  "params": {
-    "sid": "test room",
-    "offer": {
-      "type": "offer",
-      "sdp": "v=0\r\no=- ..."
-    }
-  }
-}
-```
-
-**Trickle (ICE Candidate):**
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "trickle",
-  "params": {
-    "target": 0,
-    "candidate": {
-      "candidate": "candidate:...",
-      "sdpMid": "0",
-      "sdpMLineIndex": 0
-    }
-  }
-}
-```
+| Component    | Language   | Role      | Description                                                   |
+| ------------ | ---------- | --------- | ------------------------------------------------------------- |
+| `publisher/` | Go         | Publisher | Captures camera/microphone, encodes to VP8, broadcasts to SFU |
+| `viewer/`    | JavaScript | Viewer    | Receives streams using LiveKit client SDK                     |
 
 ## Project Structure
 
@@ -114,14 +47,10 @@ ion-sample/
 │   ├── main.go          # Go broadcaster client
 │   ├── go.mod           # Go module definition
 │   └── go.sum           # Dependency checksums
-├── viewer-sdk/
-│   ├── index.html       # HTML page with Ion SDK
-│   └── index.js         # High-level Ion SDK implementation
-├── viewer-raw/
-│   ├── index.html       # HTML page with raw WebRTC
-│   └── index.js         # Low-level WebRTC implementation
-├── docker-compose.yml   # Ion SFU server
-├── sfu.toml             # Ion SFU configuration
+├── viewer/
+│   ├── index.html       # HTML page
+│   └── index.js         # LiveKit SDK implementation
+├── docker-compose.yml   # LiveKit server
 ├── justfile             # Task runner commands
 ├── LICENSE
 └── README.md
@@ -131,84 +60,105 @@ ion-sample/
 
 ### Go Client (`publisher/main.go`)
 
-| Setting      | Value                     | Description                                        |
-| ------------ | ------------------------- | -------------------------------------------------- |
-| SFU Address  | `localhost:7000`          | WebSocket endpoint (configurable via `-addr` flag) |
-| STUN Server  | `stun.l.google.com:19302` | Google's public STUN server                        |
-| Room ID      | `test room`               | Room identifier                                    |
-| Video Codec  | VP8                       | Video encoding format                              |
-| Bitrate      | 500 kbps                  | Target video bitrate                               |
-| Resolution   | 640x480                   | Video dimensions                                   |
-| Frame Format | YUY2                      | Raw video format                                   |
+| Flag           | Default                 | Description           |
+| -------------- | ----------------------- | --------------------- |
+| `-host`        | `http://localhost:7880` | LiveKit server URL    |
+| `-api-key`     | `devkey`                | LiveKit API key       |
+| `-api-secret`  | `secret`                | LiveKit API secret    |
+| `-room`        | `test-room`             | Room name             |
+| `-identity`    | `go-publisher`          | Participant identity  |
 
-### JavaScript Clients
+| Setting      | Value                     | Description             |
+| ------------ | ------------------------- | ----------------------- |
+| Video Codec  | VP8                       | Video encoding format   |
+| Bitrate      | 500 kbps                  | Target video bitrate    |
+| Resolution   | 640x480                   | Video dimensions        |
+| Frame Format | YUY2                      | Raw video format        |
 
-Configuration is done via URL parameters:
+### JavaScript Client (`viewer/`)
 
-| Parameter | Default                  | Description       |
-| --------- | ------------------------ | ----------------- |
-| `sfu`     | `ws://localhost:7000/ws` | SFU WebSocket URL |
-| `room`    | `test room`              | Room identifier   |
+Configuration via URL parameters:
 
-Example: `index.html?sfu=ws://192.168.1.100:7000/ws&room=my-room`
+| Parameter    | Default                 | Description          |
+| ------------ | ----------------------- | -------------------- |
+| `host`       | `ws://localhost:7880`   | LiveKit WebSocket URL|
+| `room`       | `test-room`             | Room name            |
+| `identity`   | `viewer-<random>`       | Participant identity |
+| `api_key`    | `devkey`                | LiveKit API key      |
+| `api_secret` | `secret`                | LiveKit API secret   |
+
+Example: `index.html?room=my-room&identity=viewer1`
+
+> **Note:** The viewer generates JWT tokens client-side for development convenience.
+> In production, tokens should be generated server-side.
 
 ## Dependencies
 
 ### Go
 
-| Package                | Version | Purpose                  |
-| ---------------------- | ------- | ------------------------ |
-| `pion/webrtc/v3`       | v3.1.24 | WebRTC implementation    |
-| `pion/mediadevices`    | v0.3.2  | Camera/microphone access |
-| `gorilla/websocket`    | v1.5.0  | WebSocket client         |
-| `sourcegraph/jsonrpc2` | v0.1.0  | JSON-RPC 2.0 protocol    |
-| `google/uuid`          | v1.3.0  | UUID generation          |
+| Package                      | Purpose                  |
+| ---------------------------- | ------------------------ |
+| `livekit/protocol`           | LiveKit protocol types   |
+| `livekit/server-sdk-go/v2`   | LiveKit server SDK       |
+| `pion/webrtc/v4`             | WebRTC implementation    |
+| `pion/mediadevices`          | Camera/microphone access |
 
-### JavaScript (viewer-sdk/)
+### JavaScript
 
-| Library      | Version | Purpose                   |
-| ------------ | ------- | ------------------------- |
-| `ion-sdk-js` | 1.8.1   | High-level Ion client SDK |
-
-### JavaScript (viewer-raw/)
-
-| Library             | Purpose                     |
-| ------------------- | --------------------------- |
-| `simple-jsonrpc-js` | JSON-RPC 2.0 implementation |
+| Library          | Version | Purpose              |
+| ---------------- | ------- | -------------------- |
+| `livekit-client` | 2.9.1   | LiveKit client SDK   |
 
 ## Usage
 
 ### Prerequisites
 
-- Docker and Docker Compose (for Ion SFU server)
-- Go 1.17+ (for publisher)
+- Docker and Docker Compose (for LiveKit server)
+- Go 1.23+ (for publisher)
 - Camera and microphone (for publisher)
-- Modern web browser (for viewers)
+- Modern web browser (for viewer)
 - [just](https://github.com/casey/just) command runner (optional)
+
+### Quick Start
+
+```bash
+# Start LiveKit server
+just sfu
+
+# In another terminal, start the viewer
+just serve
+# Open http://localhost:8080 in your browser
+
+# In another terminal, start the publisher
+just publish
+```
 
 ### Using justfile
 
 ```bash
-# Start Ion SFU server
+# Start LiveKit server
 just sfu
 
-# Stop Ion SFU server
+# Stop LiveKit server
 just sfu-down
 
-# View SFU logs
+# View LiveKit logs
 just sfu-logs
 
 # Run publisher
 just publish
 
-# Run publisher with custom address
-just publish 192.168.1.100:7000
+# Run publisher with custom settings
+just publish host="http://192.168.1.100:7880"
 
-# Serve viewer (Ion SDK version)
-just serve-sdk
+# Serve viewer
+just serve
 
-# Serve viewer (raw WebRTC version)
-just serve-raw
+# Serve viewer on custom port
+just serve port=3000
+
+# Build publisher binary
+just build
 
 # Update Go dependencies
 just update-deps
@@ -216,7 +166,7 @@ just update-deps
 
 ### Manual Usage
 
-**Start SFU Server:**
+**Start LiveKit Server:**
 
 ```bash
 docker compose up -d
@@ -225,52 +175,50 @@ docker compose up -d
 **Publisher:**
 
 ```bash
-cd publisher && go run main.go -addr localhost:7000
+cd publisher
+go run main.go -host http://localhost:7880 -room my-room
 ```
 
-**Viewers:**
+**Viewer:**
 
 ```bash
-cd viewer-sdk && python3 -m http.server 8080
-# Open http://localhost:8080?sfu=ws://localhost:7000/ws
+cd viewer
+python3 -m http.server 8080
+# Open http://localhost:8080?room=my-room
 ```
 
-## Code Walkthrough
+## Authentication
 
-### Go Client (`publisher/main.go`)
+LiveKit uses JWT tokens for authentication. The token contains:
 
-1. **WebSocket Connection** (line 78): Connects to SFU server
-2. **WebRTC Configuration** (line 84-91): Sets up ICE servers and SDP semantics
-3. **Media Capture** (line 122-133): Gets camera stream using `mediadevices.GetUserMedia()`
-4. **Track Addition** (line 135-148): Adds media tracks with send-only direction
-5. **Offer Creation** (line 151-160): Creates and sets local SDP offer
-6. **ICE Handling** (line 167-194): Sends ICE candidates via `trickle` method
-7. **Join Room** (line 217-232): Sends join request with offer
-8. **Message Handler** (line 239-312): Processes SFU responses (answer, offer, trickle)
+- **API Key**: Identifies the application
+- **API Secret**: Signs the token (keep secret!)
+- **Video Grant**: Permissions (room join, publish, subscribe)
+- **Identity**: Unique participant identifier
 
-### JavaScript SDK Client (`viewer-sdk/index.js`)
+### Token Structure
 
-1. **Signal Setup**: Creates JSON-RPC signal connection
-2. **Client Creation**: Initializes Ion SDK client
-3. **Join Room**: Joins room when connection opens
-4. **Track Handler**: Creates video elements for incoming streams
-
-### JavaScript Raw Client (`viewer-raw/index.js`)
-
-1. **Peer Connection**: Creates RTCPeerConnection manually
-2. **JSON-RPC Setup**: Configures JSON-RPC over WebSocket
-3. **ICE Handling**: Sends candidates via `trickle`
-4. **Transceiver**: Adds video transceiver for receiving
-5. **Track Handler**: Displays received video
-6. **Offer/Join**: Creates offer and joins room
-7. **Message Handler**: Processes server responses
+```json
+{
+  "iss": "devkey",
+  "sub": "participant-identity",
+  "iat": 1234567890,
+  "exp": 1234654290,
+  "video": {
+    "room": "test-room",
+    "roomJoin": true,
+    "canSubscribe": true,
+    "canPublish": true
+  }
+}
+```
 
 ## References
 
-- [Ion SFU](https://github.com/pion/ion-sfu) - Selective Forwarding Unit
+- [LiveKit](https://livekit.io/) - Open source WebRTC SFU
+- [LiveKit Docs](https://docs.livekit.io/) - Official documentation
 - [Pion WebRTC](https://github.com/pion/webrtc) - Pure Go WebRTC implementation
 - [Pion MediaDevices](https://github.com/pion/mediadevices) - Media device access for Go
-- [Ion SDK JS](https://github.com/pion/ion-sdk-js) - JavaScript client SDK
 - [WebRTC API](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API) - MDN documentation
 
 ## License

@@ -1,10 +1,11 @@
 services:
-  sfu:
-    image: pionwebrtc/ion-sfu:latest-jsonrpc
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml --dev --node-ip 127.0.0.1
     ports:
-      - "7000:7000"
-      - "5000-5200:5000-5200/udp"
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+      - "50000-50100:50000-50100/udp"
     volumes:
-      - ./sfu.toml:/configs/sfu.toml:ro
-    environment:
-      - PION_LOG_TRACE=sfu
+      - ./livekit.yaml:/etc/livekit.yaml:ro

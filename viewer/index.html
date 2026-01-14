@@ -29,6 +29,11 @@
             color: #ff6b6b;
         }
 
+        .status.connected {
+            background: #1a4a1a;
+            color: #6bff6b;
+        }
+
         #remotes {
             display: flex;
             flex-wrap: wrap;
@@ -39,6 +44,20 @@
             width: 320px;
             background: #000;
             border-radius: 4px;
+        }
+
+        .participant-container {
+            position: relative;
+        }
+
+        .participant-name {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0,0,0,0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
         }
 
         .info {
@@ -56,22 +75,22 @@
         }
     </style>
 
-    <title>Ion SFU Viewer (SDK)</title>
+    <title>LiveKit Viewer</title>
 </head>
 
 <body>
-    <h1>Ion SFU Viewer</h1>
+    <h1>LiveKit Viewer</h1>
     <div id="status" class="status">Initializing...</div>
 
     <div id="remotes"></div>
 
     <div class="info">
         <strong>Configuration:</strong> Use URL parameters to configure.<br>
-        Example: <code>?sfu=ws://localhost:7000/ws&room=my-room</code>
+        Example: <code>?room=test-room&identity=viewer</code><br>
+        Optional: <code>&host=ws://localhost:7880&api_key=devkey&api_secret=secret</code>
     </div>
 
-    <script src="https://unpkg.com/ion-sdk-js@1.8.1/dist/ion-sdk.min.js"></script>
-    <script src="https://unpkg.com/ion-sdk-js@1.8.1/dist/json-rpc.min.js"></script>
+    <script src="https://unpkg.com/livekit-client@2.9.1/dist/livekit-client.umd.js"></script>
     <script src="index.js"></script>
 </body>
 

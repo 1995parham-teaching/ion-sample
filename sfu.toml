@@ -12,7 +12,7 @@ bestqualityfirst = true
 enabletemporallayer = true
 
 [webrtc]
-icemux = true
+icemux = false
 icelite = true
 iceportrange = [5000, 5200]
 sdpsemantics = "unified-plan"
